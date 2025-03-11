@@ -1,0 +1,122 @@
+#include <Wire.h>
+#include <VL53L1X.h>
+
+const uint8_t sensorCount = 2;
+const uint8_t measurementCount = 5;
+uint8_t last_distance[sensorCount] = {0, 0};
+uint8_t current_distance[sensorCount] = {0, 0};
+uint8_t elapsedTime = 0;
+float speed[sensorCount] = {0, 0};
+const uint8_t xshutPins[sensorCount] = {2, 3};
+VL53L1X sensors[sensorCount];
+
+void setup()
+{
+    Serial.begin(115200);
+    Wire.begin();
+    Wire.setClock(400000);
+    pinMode(6, OUTPUT);
+
+    for (uint8_t i = 0; i < sensorCount; i++)
+    {
+        pinMode(xshutPins[i], OUTPUT);
+        digitalWrite(xshutPins[i], LOW);
+    }
+
+    for (uint8_t i = 0; i < sensorCount; i++)
+    {
+        pinMode(xshutPins[i], INPUT);
+        delay(10);
+
+        sensors[i].setTimeout(10000);
+        if (!sensors[i].init())
+        {
+            Serial.print("Failed to detect and initialize sensor ");
+            Serial.println(i);
+            while (1);
+        }
+
+        sensors[i].setAddress(0x2A + i);
+        sensors[i].startContinuous(50);
+    }
+}
+
+uint8_t getAverageDistance(uint8_t sensorIndex)
+{
+    uint16_t sum = 0;
+    for (uint8_t i = 0; i < measurementCount; i++)
+    {
+        sum += sensors[sensorIndex].read();
+        delay(10);
+        //Serial.print("This is the sum: "); 
+        //  `Serial.print(sum);
+    }
+    return sum / measurementCount;
+}
+
+void loop()
+{
+    //delay(2000);
+    unsigned long startTime = millis();
+    int minDistance = INT_MAX;
+    int selectedSensor = -1;
+    const float speedThreshold = 0.5;
+
+    for (uint8_t i = 0; i < sensorCount; i++)
+    {
+        Serial.print("Sensor ");
+        Serial.print(i);
+        Serial.print(" Last_Distance: ");
+        Serial.println(last_distance[i]);
+
+        current_distance[i] = getAverageDistance(i);
+        Serial.print("Sensor ");
+        Serial.print(i);
+        Serial.print(" Distance: ");
+        Serial.print(current_distance[i]);
+
+        if (sensors[i].timeoutOccurred()) {
+            Serial.print(" TIMEOUT");
+        }
+
+        Serial.print("\t");
+
+        if (last_distance[i] != 0) {
+            speed[i] = (last_distance[i] - current_distance[i]) / (float)elapsedTime;
+        } else {
+            speed[i] = 0;
+        }
+
+        Serial.print("Sensor ");
+        Serial.print(i);
+        Serial.print(" Speed: ");
+        Serial.println(speed[i]);
+
+        last_distance[i] = current_distance[i];
+    }
+
+    for (uint8_t i = 0; i < sensorCount; i++)
+    {
+        if (speed[i] > speedThreshold && current_distance[i] < minDistance) {
+            minDistance = current_distance[i];
+            selectedSensor = i;
+        }
+    }
+
+    if (selectedSensor != -1) {
+        Serial.print("Selected Sensor: ");
+        Serial.println(selectedSensor);
+        //digitalWrite(6, HIGH);
+        tone(6, 300, 100);
+    } else {
+        Serial.println("No valid sensor met the speed criteria.");
+    }
+
+    unsigned long endTime = millis();
+    elapsedTime = endTime - startTime;
+
+    Serial.print("Elapsed time: ");
+    Serial.print(elapsedTime);
+    Serial.println(" ms");
+    digitalWrite(6, LOW);
+}
